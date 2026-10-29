@@ -1,0 +1,11 @@
+{
+  "name": "bend-bloom",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "stats": "node cli.mjs stats",
+    "bench": "node cli.mjs benchmark"
+  }
+}
