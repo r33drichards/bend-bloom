@@ -77,3 +77,4 @@ for(const args of [['--backend','bogus'],['--items','0'],['--probes','33'],['--f
 }
 console.log('PASS: native CPU workload (1024 inserted keys per iteration) and CLI input/resource bounds');
 console.log(command(process.execPath,['scripts/test-sizing.mjs']));
+console.log(command(process.execPath,['scripts/test-proofs.mjs']));

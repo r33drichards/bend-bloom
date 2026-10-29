@@ -1,4 +1,5 @@
 import Base
+import ./bits.bend as Bits
 
 # Public API: create, put, mightContain. Helpers and constructors are internal.
 # An affine filter owns its packed words; query returns ownership to the caller.
@@ -45,19 +46,19 @@ def hashes(+xs: List<&2, U32>) -> U32 & U32:
 
 def set_bit_finish(pair: Array<U32> & U32, index: U32, bit: U32) -> Array<U32>:
   (words, old) = pair
-  words[index] <- (old .|. bit : U32)
+  words[index] <- Bits.add(old, bit)
 
 def get_bit_finish(pair: Array<U32> & U32, bit: U32) -> Array<U32> & Bool:
   (words, value) = pair
-  (words, U32.is_ne((value .&. bit : U32), 0))
+  (words, Bits.hit(value, bit))
 
 def set_bit(words: Array<U32>, +pos: U32) -> Array<U32>:
   +index = (pos >> 5n : U32)
-  bit = (1 << U32.to_nat((pos .&. 31 : U32)) : U32)
+  bit = Bits.position_mask(pos)
   set_bit_finish(words[index], index, bit)
 
 def get_bit(words: Array<U32>, +pos: U32) -> Array<U32> & Bool:
-  bit = (1 << U32.to_nat((pos .&. 31 : U32)) : U32)
+  bit = Bits.position_mask(pos)
   get_bit_finish(words[(pos >> 5n : U32)], bit)
 
 def put_loop(n: Nat, words: Array<U32>, +mask: U32, +h: U32, +step: U32) -> Array<U32>:

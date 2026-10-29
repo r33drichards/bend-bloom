@@ -96,7 +96,7 @@ Run `npm test`. The harness compiles the Bend module to JavaScript, exercises it
 
 [VALIDATION.md](VALIDATION.md) records the actual environment, results, and GPU recovery. Tests include empty bytes, NUL, non-UTF-8, UTF-8 text bytes, all 256 byte values, deterministic random binary keys, duplicates, invalid configuration/bytes, and an intentionally saturated filter.
 
-`LAWS.bend` defines six compiler-checked laws. One is symbolic (empty input preserves any hash seed); the rest are concrete validation/round-trip regressions. **The general no-false-negative property is tested and explained, not formally proved for every filter and byte sequence.** `bend PROOF.bend` passes. The optional independent `--verdict`/Lean kernel check was not run. No `@unsafe`, foreign code, or proof holes appear in the core.
+`LAWS.bend` now defines 30 compiler-checked laws: the original six plus 24 general word/storage theorems. These prove the actual word operations preserve old/new bits, are idempotent, and support a no-false-negative theorem for arbitrary valid byte sequences on a **one-word, one-probe filter**. **The general multiword/multiprobe property remains unproved.** [PROOFS.md](PROOFS.md) lists exact statements, probability assumptions, remaining gaps, and the trust boundary. `bend PROOF.bend` passes and BendTT export succeeds; the independent `--verdict`/Lean kernel check has not run. No `@unsafe`, foreign proof code, or proof holes were added.
 
 ## References and networking
 

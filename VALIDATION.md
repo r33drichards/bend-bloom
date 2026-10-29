@@ -95,3 +95,12 @@ The new `size` command and benchmark `--expected-items`/`--fpp` path were valida
 - An actual Metal smoke test used the previously verified installed clang 21/SDK 15.2, `--expected-items 16 --fpp .01 --budget-mib 512 --items 16 --fork-depth 1 --iterations 1`. The planner selected 256 bits and 11 probes per shard, with predicted FPR about 0.00045871. Both the warmup and measured iteration checked all 32 inserted keys with zero false negatives. The measured workload was 14 ms; this tiny sample is a correctness check, not a throughput/saturation claim.
 
 The GPU smoke test used an explicit budget and reported unknown GPU memory classification in that process; separate `stats` execution detected the M3 unified-memory GPU. The explicit assumption and free-memory snapshot are preserved in [validation/gpu-sizing.json](validation/gpu-sizing.json). This illustrates why capacity discovery and actual runtime verification are separate.
+
+## Partial proof feature
+
+- Audited all six existing laws and preserved them. Five are concrete regressions; `empty_hash` is a symbolic base-case theorem.
+- Added 24 general laws, including structural word algebra, mask nonzeroness, actual single-word read-after-set/idempotence, and no-false-negatives for arbitrary valid byte lists on a one-word, one-probe filter. See PROOFS.md for the exact limits.
+- `bend PROOF.bend` and `--check-only` both report ALL PROOFS CHECK for the 30-law set. BendTT export succeeds.
+- The full `npm test` suite passes with the factored runtime word operations. Four deliberate mutations (OR-to-XOR, zero mask, discarded insertion, query-always-false) are rejected in temporary copies by the proof gate.
+- At this checkpoint no independent BendTT kernel verdict was obtained: Lean 4.34.0 and a cached kernel were absent from inspected locations. No toolchain was installed.
+- Whole-filter multiword/multiprobe correctness, full-filter compatible union, and probabilistic FPR bounds remain unproved. Publication of this partial proof feature was explicitly approved; the limits above remain.
