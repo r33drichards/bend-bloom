@@ -49,13 +49,13 @@ Insertion only ORs bits; queries reproduce the same positions and require all bi
 
 ## CLI and CPU/GPU exploration
 
-`stats` reports CPU, memory, compiler, and available graphics information. Failed probes appear as unavailable with their reason. Hardware discovery does not establish that a Bend GPU binary can run.
+`stats` reports CPU, memory, compiler, and available graphics information. Failed probes appear as unavailable with their reason. Hardware discovery does not establish that a Bend GPU binary can run. `CC` and `SDKROOT` can select an already-installed compiler and SDK per process; `stats` reports these selections. See the validation record for the verified clang 21/SDK 15.2 combination on this machine.
 
 `benchmark`, `start`, and `run` are aliases. Use `node cli.mjs --help` for bounds. `--fork-depth d` creates `2^d` independent filter shards with balanced parallel calls. Each shard inserts its keys sequentially, then queries all of them. No array is written by two tasks. This avoids lost bit updates without assuming shared atomic OR support. It benchmarks a batch of independent filters, **not one shared global filter**. More shards expose more parallelism; they do not prove GPU saturation.
 
-CPU mode explicitly disables GPU execution. GPU mode uses Bend's `!` call and passes `--gpu 256MB`. In the pinned runtime, an explicit GPU request makes an unavailable device/backend an error. It cannot silently fall back. The generated program must contain the GPU call; compilation and runtime errors fail the command. CUDA execution has not been tested here.
+CPU mode explicitly disables GPU execution. GPU mode uses Bend's `!` call and passes `--gpu 512MB`. In the pinned runtime, an explicit GPU request makes an unavailable device/backend an error. It cannot silently fall back. The generated program must contain the GPU call; compilation and runtime errors fail the command. CUDA execution has not been tested here.
 
-Bounds limit a run to 262,144 keys per iteration, 8 MiB of logical bit payload across shards, 1–5 warmups, 1–10 measured iterations, 32 CPU workers, and a 120-second timeout per subprocess. The GPU heap is capped at 256 MiB. Actual host allocations exceed packed payload. Run one benchmark at a time per checkout because `.build/benchmark` is shared.
+Bounds limit a run to 262,144 keys per iteration, 8 MiB of logical bit payload across shards, 1–5 warmups, 1–10 measured iterations, 32 CPU workers, and a 120-second timeout per subprocess. The GPU heap is capped at 512 MiB; 256 MiB was below Bend’s fixed runtime allocation requirement. Actual host allocations exceed packed payload. Run one benchmark at a time per checkout because `.build/benchmark` is shared.
 
 Output separates build time, process wall time (including warmup/startup), and measured workload wall times. Workload timing has millisecond resolution and includes key generation, allocation, insertion, all lookups, reduction, and one diagnostic print. GPU timing would include dispatch and synchronization. Isolated kernel time, occupancy, power, and utilization are not measured. Throughput counts insertions plus lookups, and is null for samples below timer resolution. Warmups run inside the same process before measured iterations. Sweep shard count and work per shard on a working GPU, checking correctness and timing; do not infer saturation from throughput alone.
 
@@ -65,7 +65,7 @@ The official [shader guide](https://github.com/bendlang/bend/blob/v2.0.39/guide/
 
 Run `npm test`. The harness compiles the Bend module to JavaScript, exercises its exported functions, checks the proof file, and compiles/runs the native example. The test oracle uses an independent unpacked bit array and checks both packed storage and queries. The native benchmark additionally checks every inserted key after each shard is fully populated.
 
-[VALIDATION.md](VALIDATION.md) records the actual environment, results, and GPU blocker. Tests include empty bytes, NUL, non-UTF-8, UTF-8 text bytes, all 256 byte values, deterministic random binary keys, duplicates, invalid configuration/bytes, and an intentionally saturated filter.
+[VALIDATION.md](VALIDATION.md) records the actual environment, results, and GPU recovery. Tests include empty bytes, NUL, non-UTF-8, UTF-8 text bytes, all 256 byte values, deterministic random binary keys, duplicates, invalid configuration/bytes, and an intentionally saturated filter.
 
 `LAWS.bend` defines six compiler-checked laws. One is symbolic (empty input preserves any hash seed); the rest are concrete validation/round-trip regressions. **The general no-false-negative property is tested and explained, not formally proved for every filter and byte sequence.** `bend PROOF.bend` passes. The optional independent `--verdict`/Lean kernel check was not run. No `@unsafe`, foreign code, or proof holes appear in the core.
 

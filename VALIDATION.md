@@ -40,21 +40,45 @@ Observed: 16 shards, 8,192 bits/shard, five probes, 8 CPU workers; 16,384 insert
 
 The workload includes allocation, key generation, insertion, queries, reduction, and diagnostic printing. These are coarse millisecond wall timings, not isolated hash, kernel, or GPU-saturation measurements. They can vary substantially with system load.
 
-## GPU status
+## GPU recovery and verification
 
-The generated GPU workload passed Bend's check-only validation. Actual compilation was attempted with:
+A bounded follow-up found installed LLVM clang 19 and 21 toolchains in the Nix store. No Apple clang 17+ or full Xcode installation was found. The successful combination was **LLVM clang 21.1.8 plus the already-installed macOS 15.2 SDK**. Selection was per-process; no software, licenses, global developer directory, credentials, or shell configuration changed.
+
+Recovery steps and outcomes:
+
+1. Default Apple clang 16 refused GPU compilation because Bend requires LLVM clang 19+/Apple clang 17+.
+2. The installed clang 19 wrapper used an older SDK lacking `MTLCompileOptions.mathMode`; raw clang 19 with SDK 15.2 failed in SDK module imports.
+3. Raw clang 21.1.8 with SDK 15.2 compiled successfully. A project-local module cache avoided writing the user-wide compiler cache.
+4. Sandboxed execution reported no usable Metal GPU. Authorized execution with hardware access reached Metal.
+5. The original 256 MiB cap failed before the workload: `the GPU span is under the rings, stacks and a page per lane`. The runtime's fixed rings/stacks already exceed that cap. The CLI cap was corrected to **512 MiB**; it remains explicit and bounded.
+6. A two-shard, 16-key-per-shard smoke test completed on GPU with zero errors. The full bounded workload below also passed. No CPU fallback was enabled.
+
+Reproduction on this machine (the Nix-store path is machine-specific):
 
 ```sh
-node cli.mjs benchmark --backend gpu --items 16 --fork-depth 1 --iterations 1
+mkdir -p .build/clang-cache
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk \
+CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-cache" \
+CC=/nix/store/q87hv65x5q7fclsshw34i7i1nky8ml7x-clang-21.1.8/bin/clang \
+node cli.mjs benchmark --backend gpu --items 1024 --fork-depth 4 \
+  --word-depth 8 --iterations 3
 ```
 
-It exited unsuccessfully with:
+Use the same command with `--backend cpu` for the CPU workload. GPU execution requires host access to Metal. The CLI passes `--gpu 512MB`; in the pinned runtime an explicit request makes an unavailable backend fatal.
 
-```text
-bend needs clang 19 (Apple clang 17) or newer to build a GPU program
-(found clang 16 as clang)
-```
+### Recovery measurements
 
-No GPU program executed and **no GPU throughput or saturation result is available**. No compiler or system installation was changed to work around this requirement. CUDA and Linux have not been exercised.
+Both used Bend 2.0.39, LLVM clang 21.1.8, 16 independent shards, 8,192 bits/shard, five probes, 1,024 four-byte integer keys per shard, eight CPU workers, one warmup, and three measured iterations. Each iteration performs 16,384 insertions and 16,384 lookups. Every inserted key was checked after its shard was populated, and every warmup/measured iteration reported zero false negatives.
 
-The pinned runtime source was inspected: explicitly requesting a GPU makes `gpu_probe` failure fatal when the program contains a `!` call. The CLI uses `--gpu 256MB`, not the automatic fallback mode. After a suitable compiler/device setup is available, the experimental GPU path still needs execution and correctness validation on that hardware.
+| Backend | Workload samples (ms) | Insert/query operations per second | Process wall time (ms) | Build (ms) |
+| --- | --- | --- | --- | --- |
+| CPU | 69, 70, 69 | 472,615 | 280.8 | 833.0 |
+| Metal GPU | 527, 474, 454 | 67,563 | 2,457.1 | 2,297.7 |
+
+Raw results are in [validation/cpu-recovery.json](validation/cpu-recovery.json) and [validation/gpu-verified.json](validation/gpu-verified.json). The earlier 792,774 CPU result used Apple clang 16 and a different run; retain its original parameters and timings above rather than treating these samples as interchangeable.
+
+**Timing interpretation:** throughput uses the sum of measured workload wall times, excluding warmup, process startup, and compilation. It includes allocation, key generation, hashing, insertion, all lookups, reduction, and one diagnostic print; GPU samples also include dispatch and synchronization. Thus it measures the whole timed workload, **not kernel-only throughput and not full process end-to-end throughput**. `processWallMs` separately includes warmup and startup. Build time is separate again.
+
+The GPU was slower for this small, pointer-heavy, 16-shard workload. These runs verify execution and correctness, not GPU saturation or a general CPU/GPU speed comparison. There was no occupancy measurement, broad parameter sweep, or interleaved repeated comparison. CUDA and Linux remain untested. The optional independent Lean proof check remains unrun.
+
+After the cap/stats changes, `npm test` passed again. `stats` now reports the compiler selected through `CC` and any `SDKROOT`, so an overridden toolchain is visible.

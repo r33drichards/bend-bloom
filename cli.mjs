@@ -16,7 +16,7 @@ const help = `Usage: node cli.mjs stats
   --warmup 1..5         Untimed iterations (default 1)
   --iterations 1..10    Measured iterations (default 3)
 Caps: 262144 keys/iteration, 8 MiB packed filter payload across shards,
-      256 MiB GPU runtime heap, 120-second compile/run timeout.
+      512 MiB GPU runtime heap, 120-second compile/run timeout.
 Each iteration creates shards, inserts all keys, then queries every key.
 Reports workload wall time, process wall time, build time and false negatives.
 GPU mode requires real GPU support; it never silently falls back to CPU.`;
@@ -27,7 +27,7 @@ function probe(exe,args) {
 function stats() {
   return {os:os.platform(),architecture:os.arch(),cpuModel:os.cpus()[0]?.model || 'unavailable',
     logicalCpus:os.cpus().length,availableParallelism:os.availableParallelism(),memoryBytes:os.totalmem(),
-    compiler:probe(bend,['version']),nativeCompiler:probe('clang',['--version']),
+    compiler:probe(bend,['version']),nativeCompiler:probe(process.env.CC || 'clang',['--version']),sdkRoot:process.env.SDKROOT || null,
     graphics:os.platform()==='darwin' ? probe('system_profiler',['SPDisplaysDataType','-json']) : probe('nvidia-smi',['--query-gpu=name,memory.total,driver_version','--format=csv,noheader']),
     gpuNote:'Hardware discovery is informational. Only a successful native GPU benchmark verifies Bend runtime support. JavaScript is sequential. No utilization/occupancy telemetry is collected.'};
 }
@@ -93,7 +93,7 @@ function benchmark(p) {
   const buildMs=performance.now()-buildStart;
   const t=performance.now();
   // Explicit GPU memory mode forces gpu_probe failure to be fatal in Bend 2.0.39.
-  const output=command(`${root}/.build/benchmark`,['+RTS','--threads',String(p.threads),'--gpu',p.backend==='gpu'?'256MB':'off']);
+  const output=command(`${root}/.build/benchmark`,['+RTS','--threads',String(p.threads),'--gpu',p.backend==='gpu'?'512MB':'off']);
   const endToEndMs=performance.now()-t;
   const errors=[...output.matchAll(/(?:warmup_)?errors=(\d+)/g)].map(m=>Number(m[1]));
   const samples=[...output.matchAll(/workload_ms=(\d+)/g)].map(m=>Number(m[1]));

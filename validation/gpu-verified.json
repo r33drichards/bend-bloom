@@ -1,0 +1,30 @@
+{
+  "compiler": "bend 2.0.39",
+  "backend": "gpu",
+  "parameters": {
+    "backend": "gpu",
+    "word-depth": 8,
+    "probes": 5,
+    "items": 1024,
+    "fork-depth": 4,
+    "threads": 8,
+    "warmup": 1,
+    "iterations": 3
+  },
+  "shards": 16,
+  "bitsPerShard": 8192,
+  "keysPerIteration": 16384,
+  "operationsPerIteration": 32768,
+  "falseNegatives": 0,
+  "buildMs": 2297.748334,
+  "processWallMs": 2457.097709,
+  "warmupIterations": 1,
+  "workloadMs": [
+    527,
+    474,
+    454
+  ],
+  "operationsPerSecond": 67563,
+  "timingNote": "Workload wall time has millisecond resolution and includes allocation, key generation, insertion, query, reduction and one diagnostic print. GPU time includes dispatch/synchronization; isolated kernel time and occupancy are not measured. Process wall time includes warmup and runtime startup, excludes build. Null throughput means below clock resolution.",
+  "topology": "Independent filters per shard; sequential inserts within each shard. No shared bit writes or single global filter."
+}
