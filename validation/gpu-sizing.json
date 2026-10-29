@@ -1,0 +1,55 @@
+{
+  "compiler": "bend 2.0.39",
+  "backend": "gpu",
+  "parameters": {
+    "backend": "gpu",
+    "word-depth": 3,
+    "probes": 11,
+    "items": 16,
+    "fork-depth": 1,
+    "threads": 8,
+    "warmup": 1,
+    "iterations": 1,
+    "expected-items": 16,
+    "fpp": 0.01,
+    "budget-mib": 512,
+    "sizing": {
+      "expectedItemsPerShard": 16,
+      "targetFpr": 0.01,
+      "predictedFpr": 0.00045871073081462814,
+      "wordDepth": 3,
+      "probes": 11,
+      "bitsPerShard": 256,
+      "packedBytesPerShard": 32,
+      "shards": 2,
+      "totalPackedBytes": 64,
+      "estimatedRequiredBytes": 469771264,
+      "backend": "gpu",
+      "budget": {
+        "budgetBytes": 536870912,
+        "requestedBudgetBytes": 536870912,
+        "source": "explicit override",
+        "hostFreeBytes": 149520384,
+        "gpuMemoryKind": "unknown",
+        "exceedsFreeSnapshot": true,
+        "runtimeReserveBytes": 469762048,
+        "note": "No memory is reserved. Free-memory snapshots can change and omit reclaimable memory or process limits. Default: min(25% host free, 12.5% host total, 1 GiB); dedicated GPU also uses at most 50% device free. GPU is capped at the CLI 512 MiB heap. Unified memory is counted once. Overrides replace the free-memory/headroom policy and may exceed the free snapshot; they remain subject to known total physical memory and the GPU cap. They are user assumptions, not verified available capacity."
+      },
+      "predictionNote": "Idealized independent/uniform-hash estimate, not a guaranteed observed false-positive rate. expected-items is a caller-supplied expected DISTINCT count per shard; the filter does not count exact distinct keys. Exceeding it can increase false positives. Sizing does not establish GPU usability."
+    }
+  },
+  "shards": 2,
+  "bitsPerShard": 256,
+  "keysPerIteration": 32,
+  "operationsPerIteration": 64,
+  "falseNegatives": 0,
+  "buildMs": 3516.7640420000007,
+  "processWallMs": 573.291166,
+  "warmupIterations": 1,
+  "workloadMs": [
+    14
+  ],
+  "operationsPerSecond": 4571,
+  "timingNote": "Workload wall time has millisecond resolution and includes allocation, key generation, insertion, query, reduction and one diagnostic print. GPU time includes dispatch/synchronization; isolated kernel time and occupancy are not measured. Process wall time includes warmup and runtime startup, excludes build. Null throughput means below clock resolution.",
+  "topology": "Independent filters per shard; sequential inserts within each shard. No shared bit writes or single global filter."
+}

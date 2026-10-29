@@ -4,12 +4,17 @@ import {spawnSync} from 'node:child_process';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
 import {root, bend, command, checkVersion} from './scripts/common.mjs';
+import {budgetFor, chooseSizing, MiB} from './sizing.mjs';
 
 const help = `Usage: node cli.mjs stats
+       node cli.mjs size --expected-items N --fpp P [--backend cpu|gpu] [--budget-mib M]
        node cli.mjs benchmark|start|run [options]
   --backend cpu|gpu     Native CPU (default) or strict GPU execution
-  --word-depth 0..10    Bits per shard = 32 * 2^depth (default 5)
+  --word-depth 0..15    Bits per shard = 32 * 2^depth (default 5)
   --probes 1..32        Hash probes per key (default 5)
+  --expected-items N   Auto-size each shard for expected distinct items
+  --fpp P              Target FPR, 0 < P < 1; requires --expected-items
+  --budget-mib M       Explicit planning budget; otherwise use stats estimate
   --items 1..4096       Four-byte keys per shard (default 128)
   --fork-depth 0..14    Independent shards = 2^depth (default 3)
   --threads 1..32       CPU workers (default min(8, available CPUs))
@@ -25,28 +30,76 @@ function probe(exe,args) {
   return r.error || r.status!==0 ? {available:false,reason:r.error?.message || r.stderr.trim() || `exit ${r.status}`} : {available:true,output:r.stdout.trim()};
 }
 function stats() {
-  return {os:os.platform(),architecture:os.arch(),cpuModel:os.cpus()[0]?.model || 'unavailable',
-    logicalCpus:os.cpus().length,availableParallelism:os.availableParallelism(),memoryBytes:os.totalmem(),
-    compiler:probe(bend,['version']),nativeCompiler:probe(process.env.CC || 'clang',['--version']),sdkRoot:process.env.SDKROOT || null,
-    graphics:os.platform()==='darwin' ? probe('system_profiler',['SPDisplaysDataType','-json']) : probe('nvidia-smi',['--query-gpu=name,memory.total,driver_version','--format=csv,noheader']),
+  const graphics = os.platform()==='darwin' ? probe('system_profiler',['SPDisplaysDataType','-json']) : probe('nvidia-smi',['--query-gpu=name,memory.total,memory.free,driver_version','--format=csv,noheader,nounits']);
+  let gpuMemory = {kind:'unknown',freeBytes:null};
+  if (graphics.available) {
+    if (os.platform()==='darwin' && os.arch()==='arm64') {
+      try {
+        if (JSON.parse(graphics.output).SPDisplaysDataType?.some(g=>g.spdisplays_metal))
+          gpuMemory = {kind:'unified',freeBytes:null,note:'GPU and CPU share host memory; no separate GPU free-capacity reading.'};
+      } catch { /* Unknown capacity remains explicit. */ }
+    } else if (os.platform()==='linux') {
+      const rows=graphics.output.split('\n').map(line=>line.split(','));
+      const free = rows.map(row=>Number(row[2]?.trim()));
+      const total = rows.map(row=>Number(row[1]?.trim()));
+      if(free.length && free.every(n=>Number.isFinite(n) && n>=0))
+        gpuMemory = {kind:'dedicated',freeBytes:Math.floor(Math.min(...free)*MiB),totalBytes:total.every(n=>Number.isFinite(n)&&n>0)?Math.floor(Math.min(...total)*MiB):null,note:'Minimum reported free memory across detected GPUs; no device selection or reservation.'};
+    }
+  }
+  const snapshot = {os:os.platform(),architecture:os.arch(),cpuModel:os.cpus()[0]?.model || 'unavailable',
+    logicalCpus:os.cpus().length,availableParallelism:os.availableParallelism(),memoryBytes:os.totalmem(),freeMemoryBytes:os.freemem(),gpuMemory,
+    compiler:probe(bend,['version']),nativeCompiler:probe(process.env.CC || 'clang',['--version']),sdkRoot:process.env.SDKROOT || null,graphics,
     gpuNote:'Hardware discovery is informational. Only a successful native GPU benchmark verifies Bend runtime support. JavaScript is sequential. No utilization/occupancy telemetry is collected.'};
+  snapshot.sizingBudgets = Object.fromEntries(['cpu','gpu'].map(backend=>{
+    try { return [backend,budgetFor(snapshot,backend)]; }
+    catch(e) { return [backend,{budgetBytes:null,reason:e.message}]; }
+  }));
+  return snapshot;
+}
+function numberOption(value,name) {
+  if(!/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value)) throw new Error(`${name} must be a finite decimal number`);
+  const result=Number(value);
+  if(!Number.isFinite(result)) throw new Error(`${name} must be finite`);
+  return result;
+}
+function sizing(p,shards) {
+  const snapshot=stats();
+  return chooseSizing({expectedItems:p['expected-items'],targetFpr:p.fpp,backend:p.backend,shards,
+    budget:budgetFor(snapshot,p.backend,p['budget-mib'])});
+}
+function sizeOptions(args) {
+  const p={backend:'cpu'}; const seen=new Set();
+  for(let i=0;i<args.length;i+=2) {
+    const key=args[i].replace(/^--/,'');
+    if(!args[i].startsWith('--') || !['backend','expected-items','fpp','budget-mib'].includes(key) || args[i+1]===undefined || seen.has(key)) throw new Error(`Invalid or repeated option: ${args[i]}`);
+    seen.add(key);p[key]=key==='backend'?args[i+1]:numberOption(args[i+1],key);
+  }
+  if(p['expected-items']===undefined || p.fpp===undefined) throw new Error('size requires --expected-items and --fpp');
+  return sizing(p,1);
 }
 function integer(value,name,min,max) {
   if(!/^\d+$/.test(value) || Number(value)<min || Number(value)>max) throw new Error(`${name} must be an integer ${min}..${max}`);
   return Number(value);
 }
 function parse(args) {
-  const defaults={'backend':'cpu','word-depth':5,'probes':5,'items':128,'fork-depth':3,'threads':Math.min(8,os.availableParallelism()),'warmup':1,'iterations':3};
-  const limits={'word-depth':[0,10],probes:[1,32],items:[1,4096],'fork-depth':[0,14],threads:[1,32],warmup:[1,5],iterations:[1,10]};
+  const defaults={'backend':'cpu','word-depth':5,'probes':5,'items':128,'fork-depth':3,'threads':Math.min(8,os.availableParallelism()),'warmup':1,'iterations':3,'expected-items':undefined,fpp:undefined,'budget-mib':undefined};
+  const limits={'word-depth':[0,15],probes:[1,32],items:[1,4096],'fork-depth':[0,14],threads:[1,32],warmup:[1,5],iterations:[1,10]};
   const seen=new Set();
   for(let i=0;i<args.length;i+=2) {
     const name=args[i].replace(/^--/,''); const value=args[i+1];
     if(!args[i].startsWith('--') || !(name in defaults) || value===undefined || seen.has(name)) throw new Error(`Invalid or repeated option: ${args[i]}`);
     seen.add(name);
-    defaults[name]=name==='backend' ? value : integer(value,name,...limits[name]);
+    defaults[name]=name==='backend' ? value : ['expected-items','fpp','budget-mib'].includes(name) ? numberOption(value,name) : integer(value,name,...limits[name]);
   }
   if(!['cpu','gpu'].includes(defaults.backend)) throw new Error('backend must be cpu or gpu');
   const shards=2**defaults['fork-depth'];
+  if(seen.has('expected-items') || seen.has('fpp')) {
+    if(!seen.has('expected-items') || !seen.has('fpp')) throw new Error('Auto-sizing requires both --expected-items and --fpp');
+    if(seen.has('word-depth') || seen.has('probes')) throw new Error('Use auto-sizing or explicit word-depth/probes, not both');
+    if(defaults.items>defaults['expected-items']) throw new Error('Benchmark items per shard exceed expected-items; raise the sizing count or lower --items');
+    defaults.sizing=sizing(defaults,shards);
+    defaults['word-depth']=defaults.sizing.wordDepth;defaults.probes=defaults.sizing.probes;
+  } else if(seen.has('budget-mib')) throw new Error('--budget-mib requires auto-sizing');
   if(shards*defaults.items>262144) throw new Error('Total keys exceed 262144');
   if(shards*4*2**defaults['word-depth']>8*1024*1024) throw new Error('Packed shard payload exceeds 8 MiB');
   return defaults;
@@ -109,6 +162,7 @@ function benchmark(p) {
 try {
   const [cmd,...args]=process.argv.slice(2);
   if(cmd==='stats' && args.length===0) console.log(JSON.stringify(stats(),null,2));
+  else if(cmd==='size') console.log(JSON.stringify(sizeOptions(args),null,2));
   else if(['benchmark','start','run'].includes(cmd)) benchmark(parse(args));
   else if(!cmd || ['--help','help','-h'].includes(cmd)) console.log(help);
   else throw new Error(help);

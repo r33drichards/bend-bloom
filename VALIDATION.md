@@ -82,3 +82,16 @@ Raw results are in [validation/cpu-recovery.json](validation/cpu-recovery.json) 
 The GPU was slower for this small, pointer-heavy, 16-shard workload. These runs verify execution and correctness, not GPU saturation or a general CPU/GPU speed comparison. There was no occupancy measurement, broad parameter sweep, or interleaved repeated comparison. CUDA and Linux remain untested. The optional independent Lean proof check remains unrun.
 
 After the cap/stats changes, `npm test` passed again. `stats` now reports the compiler selected through `CC` and any `SDKROOT`, so an overridden toolchain is visible.
+
+## Hardware-aware sizing validation
+
+The new `size` command and benchmark `--expected-items`/`--fpp` path were validated with the unchanged Bend 2.0.39 core.
+
+- Independent formula enumeration checked 40 feasible count/error-rate combinations against the selected minimum power-of-two size and optimal integer probe count. Two infeasible combinations were rejected.
+- Tests cover a probability boundary that requires the next table size, maximum core size, the 32-probe limit, exact-fit and one-byte-short budgets, per-shard overhead multiplication, invalid/nonfinite/overflowing inputs, and known-zero versus unknown memory.
+- Synthetic hardware snapshots exercise unified memory counted once, dedicated GPU headroom, explicit budget overrides, physical limits, and the 512 MiB GPU cap. These tests do not pretend to reserve hardware capacity.
+- 3,033 keys inserted into four automatically selected configurations were all found after insertion. A native auto-sized CPU workload also completed with zero false negatives.
+- The complete `npm test` suite, including the original tests and proof check, passed after this feature.
+- An actual Metal smoke test used the previously verified installed clang 21/SDK 15.2, `--expected-items 16 --fpp .01 --budget-mib 512 --items 16 --fork-depth 1 --iterations 1`. The planner selected 256 bits and 11 probes per shard, with predicted FPR about 0.00045871. Both the warmup and measured iteration checked all 32 inserted keys with zero false negatives. The measured workload was 14 ms; this tiny sample is a correctness check, not a throughput/saturation claim.
+
+The GPU smoke test used an explicit budget and reported unknown GPU memory classification in that process; separate `stats` execution detected the M3 unified-memory GPU. The explicit assumption and free-memory snapshot are preserved in [validation/gpu-sizing.json](validation/gpu-sizing.json). This illustrates why capacity discovery and actual runtime verification are separate.

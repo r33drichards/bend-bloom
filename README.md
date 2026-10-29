@@ -41,11 +41,40 @@ See [example.bend](example.bend) for a complete Bend program that inserts `[0, 2
 
 `word_depth` ranges from 0 to 15. It allocates `2^word_depth` U32 words, for `m = 32 × 2^word_depth` bits. `probes` ranges from 1 to 32. Invalid settings are rejected before allocation. Logical packed payload ranges from 4 bytes to 128 KiB; Bend's array/runtime representation adds overhead.
 
-For an anticipated `n` distinct keys and target false-positive probability `p`, estimate `m = -n ln(p)/(ln 2)^2`, round up to a supported power-of-two bit count, then choose `k ≈ (m/n) ln 2`, bounded to 1–32. For 1,000 keys at roughly 1%, use depth 9 (16,384 bits) and 11 probes. This is an estimate under idealized hashing, not a guarantee. This first API exposes explicit size and probe count; it does not yet provide `create(expectedItems, fpp)`.
+For an anticipated `n` distinct keys and target false-positive probability `p`, estimate `m = -n ln(p)/(ln 2)^2`, round up to a supported power-of-two bit count, then choose `k ≈ (m/n) ln 2`, bounded to 1–32. For 1,000 keys at roughly 1%, use depth 9 (16,384 bits) and 11 probes. This is an estimate under idealized hashing, not a guarantee. The Bend API exposes explicit size and probe count. The CLI now supplies expected-count/error-rate sizing as described below.
 
 Each key is hashed with two FNV-1a accumulators (seeds 2166136261 and 3339675911, multiplier 16777619), followed by the Murmur3 32-bit avalanche finalizer. These are noncryptographic operations modulo 2^32. The second hash is made odd. Probe `i` uses `(h1 + i*h2) & (m-1)`, starting at zero. An odd step visits distinct positions over the power-of-two table until it wraps. Word index is `position >> 5`; the bit is `1 << (position & 31)`.
 
 Insertion only ORs bits; queries reproduce the same positions and require all bits to be set. Thus valid insertions cannot remove evidence of earlier insertions. Duplicate insertions leave storage unchanged. Saturation raises false positives and can make every query positive. This reasoning assumes the same configuration/encoding and no mutation outside the API. There is no deletion, persistence, merge API, automatic resizing, adversarial-key resistance, or compatibility with another implementation's serialized format.
+
+## Hardware-aware sizing
+
+```sh
+# Plan one filter using conservative estimates from stats; allocates no filter.
+node cli.mjs size --expected-items 1000 --fpp 0.01
+
+# Use an explicit budget when you know more than the free-memory snapshot.
+node cli.mjs size --expected-items 1000 --fpp 0.01 --budget-mib 128
+
+# Auto-size each independent benchmark shard, then run the usual bounded test.
+node cli.mjs benchmark --expected-items 1000 --fpp 0.01 \
+  --budget-mib 128 --items 1000 --fork-depth 3
+
+# GPU planning retains the existing strict 512 MiB runtime cap.
+node cli.mjs size --backend gpu --expected-items 1000 --fpp 0.01 --budget-mib 512
+```
+
+Supply both `--expected-items` and `--fpp`. The count means expected **distinct keys per shard**, supplied by you; the filter cannot count exact distinct keys. Repeated insertions do not require increasing this count, while more distinct keys can raise the observed false-positive rate. `--items` still controls benchmark work and cannot exceed the specified expected count. Do not combine auto-sizing with explicit `--word-depth` or `--probes`.
+
+The planner checks every supported power-of-two size from 32 to 1,048,576 bits and all integer probe counts from 1 to 32. It selects the smallest supported size whose best modeled probability meets the target. Output includes `wordDepth`, `probes`, packed bytes, estimated total resource requirement, and predicted FPR using `(1 - exp(-k*n/m))^k`. For 1,000 items at a 1% target, it chooses depth 9, 11 probes, and 16,384 bits; the modeled FPR is about **0.03823%**. Integer probing and power-of-two rounding explain the extra margin. This is an idealized hashing model, not a guarantee for this hash function or adversarial inputs.
+
+`stats` exposes free host RAM, GPU memory classification, and default planning budgets. The default budget is the minimum of 25% reported free host RAM, 12.5% total host RAM, and 1 GiB. On Apple Silicon with detected Metal, CPU/GPU memory is treated as one shared pool; it is never added together. For detected dedicated NVIDIA GPUs, the GPU budget also uses at most half the smallest reported device-free capacity. All GPU planning is capped at the CLI's 512 MiB runtime heap. Unknown GPU capacity requires an explicit budget; detecting hardware does not prove it can run Bend.
+
+The planning model reserves **64 MiB for CPU** or **448 MiB for GPU**, plus **64 bytes per allocated U32 word and 4 KiB per shard**. These are conservative allowances for runtime, array-tree overhead, and transient work, not measured or guaranteed resident memory. The GPU reserve accounts for the pinned runtime's fixed rings/stacks; oversized shard counts can exceed its remaining space even when packed bits look small. Total estimates include all benchmark shards. Existing work/time/payload caps remain in force.
+
+A request that exceeds the estimated budget, supported core size/probe limits, or known total physical memory fails with an explanation. Zero/negative/nonfinite inputs, unsafe integer counts, invalid probabilities, and impossible budgets are rejected before compilation. A standalone `size` command only plans; it does not allocate memory or test the device.
+
+Free RAM is a snapshot, not a reliable measure of all reclaimable memory, especially on macOS. Automatic planning may therefore reject a request conservatively. `--budget-mib` replaces the free-memory/headroom policy with your explicit assumption; it can exceed the current free reading, which is flagged as `exceedsFreeSnapshot`. It cannot exceed known total host/device memory or raise the GPU heap cap. Unknown capacity remains unknown even with an override. Neither path reserves memory, accounts for every OS/process limit, or promises successful allocation. The estimate covers filter storage and a runtime allowance, not arbitrary application input buffers.
 
 ## CLI and CPU/GPU exploration
 
